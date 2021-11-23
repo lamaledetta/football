@@ -1,0 +1,275 @@
+#!/usr/bin/python
+# -*- coding: utf_8 -*-
+import sys
+reload(sys)
+sys.setdefaultencoding('utf-8')
+
+
+#######################
+#
+# LIBRARIES N PACKAGES
+#
+#######################
+from time import sleep
+from random import random
+from statistics import mean
+
+from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from bs4 import BeautifulSoup
+
+from lxml import html
+from datetime import datetime, timedelta, date
+import datetime
+
+import requests
+import time
+import csv
+import subprocess
+#import psycopg2
+import os
+import os.path
+import platform
+import HTMLParser
+import requests
+import json, ast
+import re
+
+import pandas as pd
+
+from python.scraper import get_tournaments
+from python.scraper import get_seasons
+from python.scraper import get_match
+from python.scraper import get_fixtures
+from python.parser  import parse_tournaments
+from python.parser  import parse_match
+from python.parser  import wait
+from python.parser  import calc_expg
+from python.viz     import match_map
+from python.viz     import put_in_dbx
+#from python.build   import expg_build
+
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+
+#######################
+#
+# GLOBAL VARS
+#
+#######################
+SITE = 'https://www.whoscored.com'
+HEADERS = {'User-Agent': 'Mozilla/5.0'}
+max_year=date.today().year if date.today().month < 8 else date.today().year+1
+
+
+cwd=os.getcwd()
+csvpath = cwd+'/csv'
+jsonpath = cwd+'/json'
+if "Darwin" in platform.system():
+    dbxRoot = "/Users/giacobba/Dropbox/My xG Deliveries/" +str(max_year-1)+"-"+str(max_year)
+    r = webdriver.Chrome(cwd+'/bin/chromedriver_mac')
+else:
+    dbxRoot = "/home/giacobba/Dropbox/My\ xG\ Deliveries/" +str(max_year-1)+"-"+str(max_year)
+    r = webdriver.Chrome(cwd+'/bin/chromedriver')
+
+
+seasonBl=[6135, 7921, 7707, 8154, 8305, 8177, 8178]
+matchBl=[1365179, 1364968, 1364956, 1365061, 1365141, 1365145, 1365242, 1365268, 1375134, 1439920, 1495439, 1474617, 1474615, 1463184, 1463176, 1463206, 1509039, 1490352]
+
+superLeagues=["England-Premier-League", "Germany-Bundesliga", "France-Ligue-1", "Italy-Serie-A", "Spain-LaLiga"]
+superLeagues=["England-Premier-League", "Germany-Bundesliga", "France-Ligue-1", "Italy-Serie-A", "Spain-LaLiga", "Europe-Champions-League", "Europe-Europa-League"]
+superLeagues=["European-Championship",]
+
+
+#######################
+#
+# MAIN PROGRAM
+#
+#######################
+if __name__ == "__main__":
+    info = "main"
+
+
+    #######################
+    #
+    # INPUT ARGUMENTS
+    #
+    #######################
+    if len(sys.argv)==1:
+        r.quit()
+        print "[", info, "] "
+        print "[", info, "] *** Greetings, Professor Falken..."
+        print "[", info, "] "
+        print "[", info, "] Rebuild the whole db:\t\t\t./main.py rebuild"
+        print "[", info, "] Refresh single season:\t\t\t./main.py refresh [season]"
+        print "[", info, "] Refresh single season with force:\t./main.py refresh [season] force"
+        print "[", info, "] Refresh single match:\t\t\t./main.py match [matchId]"
+        print "[", info, "] Refresh single match with force:\t./main.py match [matchId] force"
+        print "[", info, "] "
+        sys.exit()
+
+    elif len(sys.argv)==2:
+
+        if sys.argv[1] == 'refresh':
+            min_year=max_year-1
+            tournamentsOv   = False
+            seasonsOv       = False
+            fixturesOv      = True
+            matchOv         = False
+            print "[", info, "] Refreshing", min_year, "in few seconds..."
+            wait()
+
+        elif sys.argv[1] == 'expg_build':
+            print "[", info, "] Rebuilding expg..."
+            #wait()
+            expg_build()
+            sys.exit()
+
+        elif sys.argv[1] == 'rebuild':
+            min_year=2016
+            tournamentsOv   = True
+            seasonsOv       = True
+            fixturesOv      = True
+            matchOv         = True
+            print "[", info, "] Rebuilding whole db in few seconds..."
+            wait()
+            sys.exit()
+
+    elif len(sys.argv)==3:
+
+        if sys.argv[1] == 'refresh':
+            min_year=int(sys.argv[2])
+            #max_year=min_year+1
+            tournamentsOv   = False
+            seasonsOv       = False
+            fixturesOv      = False
+            matchOv         = False
+            print "[", info, "] Refreshing", min_year, "in few seconds..."
+            wait()
+
+        if sys.argv[1] == 'match':
+            matchId=int(sys.argv[2])
+            fixtures=os.popen("grep -l "+str(matchId)+" csv/*/*/fixtures.csv").read().split("\n")[0]
+            print "[",info,"] found",matchId,"in fixtures:",fixtures
+            stage=fixtures.split("/")[1]
+            season=fixtures.split("/")[2]
+            match=os.popen("grep "+str(matchId)+" csv/*/*/fixtures.csv").read().split("\n")[0]
+            homeName=match.split(",")[8]
+            awayName=match.split(",")[11]
+            gmrv = get_match(r, matchId, "json/"+ stage + "/" + season, False)
+	    pmrv = parse_match(matchId, "json/" + stage + "/" + season, "csv/" + stage + "/" + season, stage, False)
+	    if gmrv != -1 and pmrv != -1:
+		calc_expg(matchId, "json/" + stage + "/" + season, "csv/" + stage + "/" + season, stage, stage, False)
+	    if gmrv != -1 and pmrv != -1 and stage in superLeagues:
+		match_map(matchId, homeName, awayName, csvpath, season, stage, dbxRoot, True)
+	    #put_in_dbx(matchId, homeName, awayName, stage, dbxRoot, False)
+            r.quit()
+            sys.exit()
+
+    elif len(sys.argv)==4:
+        if sys.argv[1] == 'refresh' and sys.argv[3] == 'force':
+            min_year=int(sys.argv[2])
+            tournamentsOv   = False
+            seasonsOv       = False
+            fixturesOv      = True
+            matchOv         = True
+            print "[", info, "] Refreshing", min_year, "with force in few seconds..."
+            wait()
+            sys.exit()
+
+        if sys.argv[1] == 'match' and sys.argv[3] == 'force':
+            matchId=int(sys.argv[2])
+            fixtures=os.popen("grep -l "+str(matchId)+" csv/*/*/fixtures.csv").read().split("\n")[0]
+            print "[",info,"] found",matchId,"in fixtures:",fixtures
+            stage=fixtures.split("/")[1]
+            season=fixtures.split("/")[2]
+            match=os.popen("grep "+str(matchId)+" csv/*/*/fixtures.csv").read().split("\n")[0]
+            homeName=match.split(",")[8]
+            awayName=match.split(",")[11]
+            gmrv = get_match(r, matchId, "json/"+ stage + "/" + season, True)
+	    pmrv = parse_match(matchId, "json/" + stage + "/" + season, "csv/" + stage + "/" + season, stage, True)
+	    if gmrv != -1 and pmrv != -1:
+		calc_expg(matchId, "json/" + stage + "/" + season, "csv/" + stage + "/" + season, stage, stage, True)
+	    #if gmrv != -1 and pmrv != -1 and stage in superLeagues:
+	    if gmrv != -1 and pmrv != -1 and stage:
+		match_map(matchId, homeName, awayName, csvpath, season, stage, dbxRoot, True)
+	    #put_in_dbx(matchId, homeName, awayName, stage, dbxRoot, True)
+            r.quit()
+            sys.exit()
+
+    start_time = datetime.datetime.now() 
+
+    #######################
+    #
+    # SCRAPING N PARSING
+    #
+    #######################
+    os.system("find . -name '*.json' -size -10 -exec rm {} \;")
+    os.system("find . -name '*.csv' -not -name 'seasons.csv' -not -name '*tournaments.csv' -not -name 'fixtures.csv' -size -2 -exec rm {} \;")
+
+    get_tournaments(r, jsonpath, csvpath, tournamentsOv)
+    parse_tournaments(jsonpath, csvpath, tournamentsOv)
+
+    get_seasons(r, jsonpath, csvpath, seasonsOv)
+
+    filename = csvpath + "/detailed_tournaments.csv"
+    df = pd.read_csv(filename)
+
+    for trn in df.tournamentName:
+    #for trn in superLeagues:
+        filename = csvpath + '/' + trn + '/seasons.csv'
+        sn = pd.read_csv(filename)
+        for i in range(0,len(sn.index)):
+            if sn.iloc[i]['seasonId'] in seasonBl:
+                continue
+            if sn.iloc[i]['seasonName'] in range(min_year,max_year):
+                #print "[", info, "] getting [", trn, ",", sn.iloc[i]['seasonName'], ",", sn.iloc[i]['seasonId'], "]"
+		filename = csvpath + "/" + sn.iloc[i]['tournamentName'] + "/" + str(sn.iloc[i]['seasonName']) + "/fixtures.csv"
+		#t = os.path.getmtime(filename)
+		#then=datetime.datetime.fromtimestamp(t)
+		#now=datetime.datetime.now()
+		#delta=now-then
+		#if delta.seconds > 43200:
+		#    # 12 hrs refresh
+		#    get_fixtures(r, jsonpath, csvpath, sn.iloc[i]['seasonId'], sn.iloc[i]['seasonName'], sn.iloc[i]['regionId'], sn.iloc[i]['tournamentId'], sn.iloc[i]['tournamentName'], fixturesOv)
+		get_fixtures(r, jsonpath, csvpath, sn.iloc[i]['seasonId'], sn.iloc[i]['seasonName'], sn.iloc[i]['regionId'], sn.iloc[i]['tournamentId'], sn.iloc[i]['tournamentName'], fixturesOv)
+                ft = pd.read_csv(filename)
+                for j in range(0,len(ft.index)):
+                    if ft.iloc[j]['matchId'] in matchBl:
+                        continue
+                    if 'FT' in str(ft.iloc[j]['status']) or 'AET' in str(ft.iloc[j]['status']) or 'PEN' in str(ft.iloc[j]['status']):
+                        gmrv = get_match(r, ft.iloc[j]['matchId'], jsonpath + "/" + sn.iloc[i]['tournamentName'] + "/" + str(sn.iloc[i]['seasonName']), matchOv)
+                        pmrv = parse_match(ft.iloc[j]['matchId'], jsonpath + "/" + sn.iloc[i]['tournamentName'] + "/" + str(sn.iloc[i]['seasonName']), csvpath + "/" + sn.iloc[i]['tournamentName'] + "/" + str(sn.iloc[i]['seasonName']), sn.iloc[i]['tournamentName'], matchOv)
+                        if gmrv != -1 and pmrv != -1:
+                            try:
+                                calc_expg(ft.iloc[j]['matchId'], jsonpath + "/" + sn.iloc[i]['tournamentName'] + "/" + str(sn.iloc[i]['seasonName']), csvpath + "/" + sn.iloc[i]['tournamentName'] + "/" + str(sn.iloc[i]['seasonName']), sn.iloc[i]['tournamentName'], superLeagues, matchOv)
+                            except:
+                                pass
+			if gmrv != -1 and pmrv != -1 and sn.iloc[i]['tournamentName'] in superLeagues:
+                            try:
+    			        match_map(ft.iloc[j]['matchId'], ft.iloc[j]['homeTeamName'], ft.iloc[j]['awayTeamName'], csvpath, str(sn.iloc[i]['seasonName']), sn.iloc[i]['tournamentName'], dbxRoot, matchOv)
+                            except:
+                                pass
+			#put_in_dbx(ft.iloc[j]['matchId'], ft.iloc[j]['homeTeamName'], ft.iloc[j]['awayTeamName'], sn.iloc[i]['tournamentName'], dbxRoot, matchOv)
+    r.quit()
+
+
+    #######################
+    #
+    # LOADING INTO DB
+    #
+    #######################
+    os.system("bash/loader.sh")
+
+
+    time_elapsed = datetime.datetime.now() - start_time
+    print "[",info,"] time elapsed (h:m:s):", str(time_elapsed).split('.')[0]
+    sys.exit()
+
+
+
