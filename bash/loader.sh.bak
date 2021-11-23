@@ -1,0 +1,130 @@
+#!/bin/bash
+
+exedir="/usr/local/bin/"
+RUN_ON_EV="$exedir/psql -w -d ev -U giacobba"
+info="loader"
+#START=$(date +%s);
+
+if [ -z "$1" ]
+  then
+    echo "[ $info ] reassessing whole db"
+else
+    league=$1
+    echo "[ $info ] loading $1 into db"
+fi
+
+echo "[ $info ] deleting ev db..."
+$exedir/dropdb -w ev
+$exedir/createdb -w ev
+echo "[ $info ] ev db created empty"
+
+sudo rm -f /tmp/*.csv
+
+for stage in csv/*/; do
+
+    #ELAPSED=$(date +%s);
+    tournament=`sed -e 's#csv/\(.*\)/#\1#' <<< $stage` 
+    echo "[ $info ] working on stage: $tournament"
+
+    matches=`find "$stage" -name '[[:digit:]]*.csv'`
+
+    if [ -f "$stage/$tournament.csv" ]; then
+        # can take old $tournament.csv
+        #sudo rm /tmp/$tournament.csv
+        cp $stage/$tournament.csv /tmp/$tournament.csv
+
+    else
+        # need new $tournament.csv
+        #sudo rm /tmp/$tournament.csv
+        echo "[ $info ] generating new $tournament.csv"
+        for match in ${matches[@]}; do
+
+            elab=`sed -e 's#\(.*\).csv#\1.csve#' <<< $match`
+            if [ ! -f "/tmp/$tournament.csv" ]; then
+                cat $elab > /tmp/$tournament.csv
+            else
+                tail -n +2 $elab >> /tmp/$tournament.csv
+            fi
+        done
+    fi
+
+    schema_name=`sed -e 's/-//g' <<< $tournament`
+
+$RUN_ON_EV <<SQL
+    --CREATE EXTENSION IF NOT EXISTS UNACCENT;
+    CREATE SCHEMA $schema_name;
+    SET SEARCH_PATH TO $schema_name;
+    CREATE TABLE event (
+
+        matchId                 integer,
+        startTime               date,
+        tournamentName          text,
+        season                  integer,
+        status                  text,
+        htScore                 text,
+        etScore                 text,
+        pkScore                 text,
+        ftScore                 text,
+        teamId                  integer,
+        teamName                text,
+        managerName             text,
+        refereeName             text,
+        field                   text,
+        formation               text,
+        matchPossession         numeric,
+        avgPossession           numeric,
+        opponentId              integer,
+        opponentName            text,
+        id                      text,
+        eventId                 integer,
+        playerId                integer,
+        playerName              text,
+        age                     integer,
+        height                  integer,
+        weight                  integer,
+        position                text,
+        isFirstEleven           boolean,
+        minsPlayed              integer,
+        rating                  numeric,
+        relatedPlayerId         integer,
+        relatedEventId          integer,
+        OppositeRelatedEvent    integer,
+        expandedMinute          integer,
+        period                  integer,
+        minute                  integer,
+        second                  integer,
+        x                       numeric,
+        y                       numeric,
+        endX                    numeric,
+        endY                    numeric,
+        goalMouthZ              numeric,
+        goalMouthY              numeric,
+        blockedX                numeric,
+        blockedY                numeric,
+        isTouch                 boolean,
+        type                    text,
+        outcomeType             text,
+        events                  text[],
+        expg                    numeric,
+        expgr                   numeric,
+        expa                    numeric,
+        primary key (matchId,id,teamId)
+
+    );
+    COPY event FROM '/tmp/$tournament.csv' CSV HEADER;
+    CREATE INDEX i_event ON event(matchId);
+    CREATE INDEX i_event_id ON event(Id);
+    CREATE INDEX i_event_events ON event USING GIN (events);
+    
+SQL
+
+    cp /tmp/$tournament.csv $stage/$tournament.csv 
+    echo "[ $info ] done with stage: $tournament"
+
+    #END=$(date +%s);
+    #echo $((END-ELAPSED)) | awk '{print "[ loader ] lap time: "int($1/60)" mins and "int($1%60)" secs"}'
+
+done
+
+$exedir/psql ev -c "VACUUM FULL"
+#echo $((END-START)) | awk '{print "[ loader ] elapsed time: "int($1/60)" mins and "int($1%60)" secs"}'
